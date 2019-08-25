@@ -1,9 +1,29 @@
-version: '3'
+version: '3.3'
 
 services:
     database:
-        build: ./database
+        image: mysql:5.7
+        command: --init-file /data/init.sql
+        restart: always
         volumes:
-            - ./database:/code
+            - ./db/init.sql:/data/init.sql
+            - ./db/mycustom.cnf:/etc/mysql/conf.d/custom.cnf
+ 
+        environment:
+            MYSQL_DATABASE: 'database'
+            MYSQL_USER: 'admin'
+            MYSQL_PASSWORD: 'password'
+            MYSQL_ROOT_PASSWORD: "password"
         ports:
-        - '8080:8080'
+            - "3306:3306"
+        expose:
+            - '3306'
+    api:
+        build: ./api
+        restart: always
+        volumes:
+            - ./api:/code
+        ports:
+            - '8080:8080'
+        expose:
+            - '8080'
