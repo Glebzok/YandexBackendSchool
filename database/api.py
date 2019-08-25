@@ -3,12 +3,15 @@
 from flask import Flask, jsonify, request, make_response, redirect, url_for
 from flask_restful import Resource, Api
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import and_, func, update
+from sqlalchemy import and_, func, update, or_, cast
 from cerberus import Validator
 from flask_marshmallow import Marshmallow
 
 import os
 from datetime import datetime
+
+from numpy import percentile
+from numpy import round as rnd
 
 # Init app
 
@@ -222,13 +225,15 @@ class ImportSchema(ma.Schema):
         
 class TieSchema(ma.Schema):
     class Meta:
-        fields = ('import_id', 'first_citizen_id', 'second_citizen_id')
+        fields = ('import_id', 'first_citizen_id', 'second_citizen_id', 'relatives')
         
 # Citizen Schema
 class Relatives(ma.Field):
     def _serialize(self, value, attr, obj):
         if value:
             return [int(i) for i in value.split(',')]
+        else:
+            return []
             
 class Birth_date(ma.Field):
     def _serialize(self, value, attr, obj):
@@ -241,6 +246,14 @@ class CitizenSchema(ma.Schema):
     class Meta:
         fields = ('citizen_id', 'town', 'street', 'building', 'apartment', 'name', 'birth_date', 'gender', 'relatives')
         
+class Birth_info_Schema(ma.Schema):
+    class Meta:
+        fields = ('citizen_id', 'number_of_relatives', 'birth_month')
+        
+class Age_info_Schema(ma.Schema):
+    class Meta:
+        fields = ('town', 'birth_dates')
+        
 # Init Schema
 
 import_schema = ImportSchema()
@@ -251,6 +264,13 @@ ties_schema = TieSchema(many = True)
 
 citizen_schema = CitizenSchema()
 citizens_schema = CitizenSchema(many = True)
+
+birth_info_schema = Birth_info_Schema()
+births_info_schema = Birth_info_Schema(many = True)
+
+age_info_schema = Age_info_Schema()
+ages_info_schema = Age_info_Schema(many = True)
+
 
 # Add data set
 
@@ -317,20 +337,60 @@ class change_data(Resource):
         is_valid = (Citizen.query.filter(Citizen.import_id == import_id, Citizen.citizen_id == citizen_id).first() != None) and\
                    (validator.validate({'dict':request.json}, patch_validation_schema))
         if is_valid:
+        
+            # process new relatives information
+            
             if 'relatives' in request.json.keys():
+                                
+                new_relatives = set(request.json['relatives'])
                 
-                return '', 200
-            else:
+                possible_relatives = [i['citizen_id'] for i in citizens_schema.dump(db.session.query(Citizen, Citizen.citizen_id).filter(Citizen.import_id == import_id).all())]
+
+                for new_relative in new_relatives:
+                    if new_relative not in possible_relatives:
+                        return '', 400
+                
+                old_relatives = db.session.query(Tie, func.group_concat(Tie.second_citizen_id).label('relatives')).filter(Tie.import_id == import_id, Tie.first_citizen_id == citizen_id).group_by(Tie.import_id, Tie.first_citizen_id).first()
+                old_relatives = tie_schema.dump(old_relatives).get('relatives', '')
+                if old_relatives != '':
+                    old_relatives = set([int(i) for i in old_relatives.split(',')])
+                else:
+                    old_relatives = set([])
+                    
+                to_delete = old_relatives - new_relatives
+                to_insert = new_relatives - old_relatives
+                
+                if len(to_delete) != 0:
+                    Tie.query.filter(or_(and_(Tie.import_id == import_id, Tie.first_citizen_id == citizen_id, Tie.second_citizen_id.in_(to_delete)), and_(Tie.import_id == import_id, Tie.second_citizen_id == citizen_id, Tie.first_citizen_id.in_(to_delete)))).delete(synchronize_session=False)
+                    
+                if len(to_insert) != 0:
+                    for relative in to_insert:
+                        first_tie = Tie(import_id, citizen_id, relative)                    
+                        db.session.add(first_tie)
+                        
+                        if relative != citizen_id:
+                            second_tie = Tie(import_id, relative, citizen_id)                    
+                            db.session.add(second_tie)
+                
+                db.session.commit()
+                
+                request.json.pop('relatives')
+                
+            # process othe new information
+                
+            if len(request.json.keys()) != 0:
+                
                 db.session.query(Citizen).filter(Citizen.import_id == import_id, Citizen.citizen_id == citizen_id).update(request.json)
                  
                 db.session.commit()
-                
-                citizen = db.session.query(Citizen, Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender, func.group_concat(Tie.second_citizen_id).label('relatives'))\
-                .join(Tie, and_(Citizen.citizen_id==Tie.first_citizen_id, Citizen.import_id==import_id, Tie.import_id==import_id, Citizen.citizen_id == citizen_id, Tie.first_citizen_id == citizen_id))\
-                .group_by(Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender)\
-                .first()
-                result = citizen_schema.dump(citizen)
-                return make_response(jsonify({'data': result}), 200)
+            
+            citizen = db.session.query(Citizen, Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender, func.group_concat(Tie.second_citizen_id).label('relatives'))\
+            .outerjoin(Tie, and_(Citizen.citizen_id==Tie.first_citizen_id, Citizen.import_id==import_id, Tie.import_id==import_id, Citizen.citizen_id == citizen_id, Tie.first_citizen_id == citizen_id))\
+            .group_by(Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender)\
+            .first()
+            result = citizen_schema.dump(citizen)
+#            result = ties_schema.dump(Tie.query.all())
+            return make_response(jsonify({'data': result}), 200)
         else:
             return '', 400
             
@@ -341,20 +401,74 @@ api.add_resource(change_data, '/imports/<int:import_id>/citizens/<int:citizen_id
 class get_data(Resource):
     def get(self, import_id): 
         is_valid_id = (Import.query.filter(Import.import_id == import_id).first() != None)
-#        is_valid_id = True
         if is_valid_id:
-#            all_citizens = Citizen.query.filter(Citizen.import_id == import_id)
             citizens = db.session.query(Citizen, Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender, func.group_concat(Tie.second_citizen_id).label('relatives'))\
-            .join(Tie, and_(Citizen.citizen_id==Tie.first_citizen_id, Citizen.import_id==import_id, Tie.import_id==import_id))\
+            .outerjoin(Tie, and_(Citizen.citizen_id==Tie.first_citizen_id, Citizen.import_id==import_id, Tie.import_id==import_id))\
             .group_by(Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender)
             result = citizens_schema.dump(citizens)
-#                result = imports_schema.dump(Import.query.all())
-#            result = ties_schema.dump(ties_in_import)
+#            result = ties_schema.dump(Tie.query.all())
             return make_response(jsonify({'data': result}), 200)
         else:
             return '', 400
             
 api.add_resource(get_data, '/imports/<int:import_id>/citizens')
+
+# get birthdays info
+
+class get_birthdays(Resource):
+    def get(self, import_id):
+        is_valid_id = (Import.query.filter(Import.import_id == import_id).first() != None)
+        if is_valid_id:
+            ties = db.session.query(Tie, Tie.first_citizen_id, func.count().label('number_of_relatives'), func.extract('month', Citizen.birth_date).label('birth_month'))\
+            .join(Citizen, and_(Citizen.citizen_id == Tie.second_citizen_id, Citizen.import_id == import_id, Tie.import_id == import_id))\
+            .group_by(Tie.first_citizen_id, 'birth_month').subquery()
+            
+            ties = db.session.query(ties, ties.c.birth_month, func.group_concat(ties.c.first_citizen_id).label('citizen_id'),func.group_concat(ties.c.number_of_relatives).label('number_of_relatives'))\
+            .group_by('birth_month')
+            
+            result = {str(i): [] for i in range(1,13)}
+            for month in births_info_schema.dump(ties):
+                for citizen, count in zip(month['citizen_id'].split(','), month['number_of_relatives'].split(',')):
+                    result[str(month['birth_month'])].append({'citizen_id': int(citizen), 'presents': int(count)})
+                    
+            return make_response(jsonify({'data':result}), 200)
+        else:
+            return '', 400
+        
+api.add_resource(get_birthdays, '/imports/<int:import_id>/citizens/birthdays')
+
+# get age distribution info
+
+class get_age(Resource):
+    def get(self, import_id ):
+        is_valid_id = (Import.query.filter(Import.import_id == import_id).first() != None)
+        if is_valid_id:
+            ages = db.session.query(Citizen, Citizen.town, func.group_concat(Citizen.birth_date).label('birth_dates')).filter(Citizen.import_id == import_id)\
+            .group_by(Citizen.town)
+            
+            result = []
+            
+            current_date = datetime.utcnow()
+            
+            for town in ages_info_schema.dump(ages):
+                town_name = town['town']
+                birth_dates = [datetime.strptime(date, '%Y-%m-%d') for date in town['birth_dates'].split(',')]
+                ages = [current_date.year - born.year - ((current_date.month, current_date.day) < (born.month, born.day)) for born in birth_dates]
+                
+                p50 = rnd(percentile(ages, 50), 2) 
+                p75 = rnd(percentile(ages, 75), 2) 
+                p99 = rnd(percentile(ages, 99), 2)
+                
+                result.append({'town': town_name,
+                               'p50': p50,
+                               'p75': p75,
+                               'p99': p99})                
+            
+            return make_response(jsonify({'data': result}), 200)
+        else:
+            return '', 400
+            
+api.add_resource(get_age, '/imports/<int:import_id>/towns/stat/percentile/age')
 
 #Run server
 
