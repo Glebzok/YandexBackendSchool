@@ -1,7 +1,6 @@
 import requests
 import time
 import json
-from cerberus import Validator
 from datetime import datetime, timedelta
 from faker import Faker
 import random
