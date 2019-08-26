@@ -4,7 +4,6 @@ services:
     database:
         image: mysql:5.7
         command: --init-file /data/init.sql
-        restart: always
         volumes:
             - ./db/init.sql:/data/init.sql
             - ./db/mycustom.cnf:/etc/mysql/conf.d/custom.cnf
@@ -18,12 +17,16 @@ services:
             - "3306:3306"
         expose:
             - '3306'
+        restart: always
+        
     api:
         build: ./api
-        restart: always
         volumes:
             - ./api:/code
         ports:
             - '8080:8080'
         expose:
             - '8080'
+        depends_on:
+            - "database"  
+        restart: always              
