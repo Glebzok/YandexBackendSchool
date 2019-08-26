@@ -10,7 +10,6 @@ import concurrent.futures
 import argparse
 
 MAX_TIES = 1000
-server_url = 'http://0.0.0.0:8080'
 
 def strTimeProp(start, end, format, prop):
     """Get a time at a proportion of a range of two formatted times.
@@ -148,7 +147,7 @@ def ordered(obj):
     else:
         return obj
           
-def post_and_get_requests_test_worker(faker, n_requests = 10, n_citizen_per_request = 10, p_of_wrong_request = 0.5):
+def post_and_get_requests_test_worker(server_url, faker, n_requests = 10, n_citizen_per_request = 10, p_of_wrong_request = 0.5):
     for r in range(n_requests):
         
         is_request_wrong = random.choices([True, False], weights=[p_of_wrong_request, 1-p_of_wrong_request])[0]
@@ -167,10 +166,10 @@ def post_and_get_requests_test_worker(faker, n_requests = 10, n_citizen_per_requ
             assert get_response.status_code == 200
             assert ordered(get_response.json()['data']) == ordered(data)
 
-def post_and_get_requests_test(requests_per_worker = 10, simultaneous_requests = 2, n_citizen_per_request = 10, p_of_wrong_request = 0.5):
+def post_and_get_requests_test(server_url, requests_per_worker = 10, simultaneous_requests = 2, n_citizen_per_request = 10, p_of_wrong_request = 0.5):
     faker = Faker('ru_RU')
     with ThreadPoolExecutor(max_workers=simultaneous_requests) as pool:
-        futures = {pool.submit(post_and_get_requests_test_worker, faker, requests_per_worker, n_citizen_per_request, p_of_wrong_request):i for i in range(simultaneous_requests)}
+        futures = {pool.submit(post_and_get_requests_test_worker, server_url, faker, requests_per_worker, n_citizen_per_request, p_of_wrong_request):i for i in range(simultaneous_requests)}
         for future in (concurrent.futures.as_completed(futures)):
             try:
                 data = future.result()
@@ -181,16 +180,17 @@ def post_and_get_requests_test(requests_per_worker = 10, simultaneous_requests =
 if __name__ == '__main__':            
     parser = argparse.ArgumentParser(description='REST API test app')
     
-    parser.add_argument('rpw', type=int, nargs='?', help='Number of requests to send per worker')
-    parser.add_argument('nw', type=int, nargs='?', help='Number of workers')
-    parser.add_argument('ncr', type=int, nargs='?', help='Number of citizens in post request json')
-    parser.add_argument('puvr', type=float, nargs='?', help='Probability of unvalid request')
+    parser.add_argument('-url',  help = "Servet url. Example: 'http://0.0.0.0:8080'")
+    parser.add_argument('-rpw', type=int, nargs='?', help='Number of requests to send per worker')
+    parser.add_argument('-nw', type=int, nargs='?', help='Number of workers')
+    parser.add_argument('-ncr', type=int, nargs='?', help='Number of citizens in post request json')
+    parser.add_argument('-puvr', type=float, nargs='?', help='Probability of unvalid request')
     
     args = parser.parse_args()
+    server_url = args.url
     requests_per_worker = args.rpw
     simultaneous_requests = args.nw
     n_citizen_per_request = args.ncr
     p_of_wrong_request = args.puvr
     
-    post_and_get_requests_test(requests_per_worker, simultaneous_requests, n_citizen_per_request, p_of_wrong_request)
-    post_and_get_requests_test    
+    post_and_get_requests_test(server_url, requests_per_worker, simultaneous_requests, n_citizen_per_request, p_of_wrong_request)
