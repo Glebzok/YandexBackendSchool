@@ -84,11 +84,15 @@ db.session.commit()
 # Citizen validator
 
 def is_passed(field, value, error):
-    if not value.date() < datetime.utcnow().date():
+    if value == None:
+        error(field, "Is None")
+    elif not value.date() < datetime.utcnow().date():
         error(field, "Must be passed data")
         
 def has_no_duplicates(field, value, error):
-    if not len(value) == len(list(set(value))):
+    if value == None:
+        error(field, "Is None")
+    elif not len(value) == len(list(set(value))):
         error(field, "All values must be unique")
         
 post_validation_schema = {
@@ -101,62 +105,75 @@ post_validation_schema = {
                     'citizen_id': {
                     'type': 'integer',
                     'min' : 0,
-                    'required': True
+                    'required': True,
+                    'nullable': False
                     },
                     'town': {
                         'type': 'string',
                         'minlength': 1,
                         'maxlength': 256,
-                        'regex': '(?=.*?([0-9А-Яа-яA-Za-z])).+',
-                        'required': True
+                        'regex': '(?=.*?([ёЁ0-9А-Яа-яA-Za-z])).+',
+                        'required': True,
+                        'nullable': False
                         
                     },
                     'street': {
                         'type': 'string',
                         'minlength': 1,
                         'maxlength': 256,
-                        'regex': '(?=.*?([0-9А-Яа-яA-Za-z])).+',
-                        'required': True
+                        'regex': '(?=.*?([ёЁ0-9А-Яа-яA-Za-z])).+',
+                        'required': True,
+                        'nullable': False
                     },
                     'building': {
                         'type': 'string',
                         'minlength': 1,
                         'maxlength': 256,
-                        'regex': '(?=.*?([0-9А-Яа-яA-Za-z])).+',
-                        'required': True
+                        'regex': '(?=.*?([ёЁ0-9А-Яа-яA-Za-z])).+',
+                        'required': True,
+                        'nullable': False
                     },
                     'apartment': {
                         'type': 'integer',
                         'min': 0,
-                        'required': True
+                        'required': True,
+                        'nullable': False
                     },
                     'name': {
                         'type': 'string',
                         'minlength': 1,
                         'maxlength': 256,
-                        'required': True
+                        'regex': "^[.\-\'Ёё а-яА-Яa-zA-Z\\s]+",
+                        'required': True,
+                        'nullable': False
                     },
                     'birth_date': {
                         'type': 'datetime',
                         'coerce': lambda s: datetime.strptime(s, '%d.%m.%Y'),
                         'validator': is_passed,
-                        'required': True
+                        'required': True,
+                        'nullable': False
                     },
                     'gender': {
                         'type': 'string',
                         'allowed': ['male', 'female'],
-                        'required': True
+                        'required': True,
+                        'nullable': False
                     },
                     'relatives': {
                         'type': 'list',
                         'validator': has_no_duplicates,
                         'schema': {
                             'type': 'integer',
-                            'min' : 0
+                            'min' : 0,
+                            'nullable': False
                         },
-                        'required': True
+                        'required': True,
+                        'nullable': False
                     }
-                }
+                },
+                'required': True,
+                'nullable': False
                 
             }
         }
@@ -172,48 +189,60 @@ patch_validation_schema = {
                 'type': 'string',
                 'minlength': 1,
                 'maxlength': 256,
-                'regex': '(?=.*?([0-9А-Яа-яA-Za-z])).+'
+                'regex': '(?=.*?([ёЁ0-9А-Яа-яA-Za-z])).+',
+                'nullable': False
                 
             },
             'street': {
                 'type': 'string',
                 'minlength': 1,
                 'maxlength': 256,
-                'regex': '(?=.*?([0-9А-Яа-яA-Za-z])).+'
+                'regex': '(?=.*?([ёЁ0-9А-Яа-яA-Za-z])).+',
+                'nullable': False
             },
             'building': {
                 'type': 'string',
                 'minlength': 1,
                 'maxlength': 256,
-                'regex': '(?=.*?([0-9А-Яа-яA-Za-z])).+'
+                'regex': '(?=.*?([ёЁ0-9А-Яа-яA-Za-z])).+',
+                'nullable': False
             },
             'apartment': {
                 'type': 'integer',
-                'min': 0
+                'min': 0,
+                'nullable': False
             },
             'name': {
                 'type': 'string',
                 'minlength': 1,
-                'maxlength': 256
+                'maxlength': 256,
+                'regex': "^[.\-\'Ёё а-яА-Яa-zA-Z\\s]+",
+                'nullable': False
             },
             'birth_date': {
                 'type': 'datetime',
                 'coerce': lambda s: datetime.strptime(s, '%d.%m.%Y'),
-                'validator': is_passed
+                'validator': is_passed,
+                'nullable': False
             },
             'gender': {
                 'type': 'string',
-                'allowed': ['male', 'female']
+                'allowed': ['male', 'female'],
+                'nullable': False
             },
             'relatives': {
                 'type': 'list',
                 'validator': has_no_duplicates,
                 'schema': {
                     'type': 'integer',
-                    'min' : 0
-                }
+                    'min' : 0,
+                    'nullable': False
+                },
+                'nullable': False
             }
-        }                
+        },
+        'required': True,
+        'nullable': False                
     }
 }
 
@@ -288,10 +317,14 @@ class import_data(Resource):
             import_id = int(new_import.import_id)
             
             family_ties = {}            
-        
+            
+            citizens_ids = []
+            
             for citizen in request.json:
                 
                 citizen_id = citizen['citizen_id']
+                citizens_ids.append(citizen_id)
+                
                 town = citizen['town']
                 street = citizen['street']
                 building = citizen['building']
@@ -311,13 +344,21 @@ class import_data(Resource):
                     
                 family_ties[citizen_id] = set(relatives)
                 
+            # Check if there is now duplicate citizen_ids
+            
+            if not len(citizens_ids) == len(list(set(citizens_ids))):
+                db.session.rollback()
+                db.session.query(Import).filter(Import.import_id == import_id).delete()
+                db.session.commit()
+                return '', 400
+                
             # Check if family ties are valid
             
             for citizen in family_ties.keys():
                 for relative in family_ties[citizen]:
                     if relative not in family_ties.keys() or citizen not in family_ties[relative]:
                         db.session.rollback()
-                        Import.query.filter(Import.import_id == import_id).delete()
+                        db.session.query(Import).filter(Import.import_id == import_id).delete()
                         db.session.commit()
                         return '', 400
                 
@@ -327,7 +368,7 @@ class import_data(Resource):
         else:
             db.session.rollback()
             db.session.commit()
-            return '', 400
+            return 'oops', 400
                
 api.add_resource(import_data, '/imports')
 
@@ -336,7 +377,7 @@ api.add_resource(import_data, '/imports')
 class change_data(Resource):
     def patch(self, import_id, citizen_id):
         validator = Validator()
-        is_valid = (Citizen.query.filter(Citizen.import_id == import_id, Citizen.citizen_id == citizen_id).first() != None) and\
+        is_valid = (db.session.query(Citizen).filter(Citizen.import_id == import_id, Citizen.citizen_id == citizen_id).first() != None) and\
                    (validator.validate({'dict':request.json}, patch_validation_schema))
         if is_valid:
         
@@ -363,7 +404,7 @@ class change_data(Resource):
                 to_insert = new_relatives - old_relatives
                 
                 if len(to_delete) != 0:
-                    Tie.query.filter(or_(and_(Tie.import_id == import_id, Tie.first_citizen_id == citizen_id, Tie.second_citizen_id.in_(to_delete)), and_(Tie.import_id == import_id, Tie.second_citizen_id == citizen_id, Tie.first_citizen_id.in_(to_delete)))).delete(synchronize_session=False)
+                    db.session.query(Tie).filter(or_(and_(Tie.import_id == import_id, Tie.first_citizen_id == citizen_id, Tie.second_citizen_id.in_(to_delete)), and_(Tie.import_id == import_id, Tie.second_citizen_id == citizen_id, Tie.first_citizen_id.in_(to_delete)))).delete(synchronize_session=False)
                     
                 if len(to_insert) != 0:
                     for relative in to_insert:
@@ -392,7 +433,6 @@ class change_data(Resource):
             .group_by(Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender)\
             .first()
             result = citizen_schema.dump(citizen)
-#            result = ties_schema.dump(Tie.query.all())
             return make_response(jsonify({'data': result}), 200)
         else:
             return '', 400
@@ -403,14 +443,13 @@ api.add_resource(change_data, '/imports/<int:import_id>/citizens/<int:citizen_id
 
 class get_data(Resource):
     def get(self, import_id): 
-        is_valid_id = (Import.query.filter(Import.import_id == import_id).first() != None)
+        is_valid_id = (db.session.query(Import).filter(Import.import_id == import_id).first() != None)
         if is_valid_id:
             citizens = db.session.query(Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender, func.group_concat(Tie.second_citizen_id).label('relatives'))\
             .filter(Citizen.import_id == import_id)\
             .outerjoin(Tie, and_(Citizen.citizen_id==Tie.first_citizen_id, Citizen.import_id==import_id, Tie.import_id==import_id))\
             .group_by(Citizen.import_id, Citizen.citizen_id, Citizen.town, Citizen.street, Citizen.building, Citizen.apartment, Citizen.name, Citizen.birth_date, Citizen.gender)
             result = citizens_schema.dump(citizens)
-#            result = ties_schema.dump(Tie.query.all())
             return make_response(jsonify({'data': result}), 200)
         else:
             return '', 400
@@ -421,7 +460,7 @@ api.add_resource(get_data, '/imports/<int:import_id>/citizens')
 
 class get_birthdays(Resource):
     def get(self, import_id):
-        is_valid_id = (Import.query.filter(Import.import_id == import_id).first() != None)
+        is_valid_id = (db.session.query(Import).filter(Import.import_id == import_id).first() != None)
         if is_valid_id:
             ties = db.session.query(Tie.first_citizen_id, func.count().label('number_of_relatives'), func.extract('month', Citizen.birth_date).label('birth_month'))\
             .join(Citizen, and_(Citizen.citizen_id == Tie.second_citizen_id, Citizen.import_id == import_id, Tie.import_id == import_id))\
@@ -445,7 +484,7 @@ api.add_resource(get_birthdays, '/imports/<int:import_id>/citizens/birthdays')
 
 class get_age(Resource):
     def get(self, import_id ):
-        is_valid_id = (Import.query.filter(Import.import_id == import_id).first() != None)
+        is_valid_id = (db.session.query(Import).filter(Import.import_id == import_id).first() != None)
         if is_valid_id:
             ages = db.session.query(Citizen.town, func.group_concat(Citizen.birth_date).label('birth_dates')).filter(Citizen.import_id == import_id)\
             .group_by(Citizen.town)
@@ -477,4 +516,4 @@ api.add_resource(get_age, '/imports/<int:import_id>/towns/stat/percentile/age')
 #Run server
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)  
+    app.run(host='0.0.0.0', port=8080, debug=False)  
